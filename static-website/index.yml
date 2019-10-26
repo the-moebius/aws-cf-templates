@@ -1,0 +1,17 @@
+
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: An integrating stack for static website hosting (hosting + pipeline)
+
+Parameters: ~
+
+Resources:
+  HostingStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: "s3://.../hosting.cf.yml"
+
+  PipelineStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: "s3://.../pipeline.cf.yml"

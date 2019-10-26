@@ -1,0 +1,436 @@
+
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: A stack for static website hosting pipeline
+
+Parameters:
+  StageBucketName:
+    Description: Name of the stage S3 bucket to deploy to
+    Type: String
+
+  StageDistributionId:
+    Description: CloudFront distribution ID for the stage S3 bucket
+    Type: String
+
+  ProdBucketName:
+    Description: Name of the production S3 bucket to deploy to
+    Type: String
+
+  ProdDistributionId:
+    Description: CloudFront distribution ID for the production S3 bucket
+    Type: String
+
+  GitHubOwner:
+    Description: Name of the GitHub repository owner
+    Type: String
+
+  GitHubRepo:
+    Description: Name of the GitHub repository
+    Type: String
+
+  GitHubBranch:
+    Description: GitHub repository branch
+    Type: String
+
+  GitHubWebhookSecretToken:
+    Description: >-
+      A secret token to configure webhook on your GitHub repository.
+      You can just use a random string with 20 characters in length.
+    Type: String
+    MinLength: 40
+    MaxLength: 40
+    NoEcho: true
+
+  GitHubAccessToken:
+    Description: Personal access token to connect to GitHub account
+    Type: String
+    MinLength: 40
+    MaxLength: 40
+    NoEcho: true
+
+  ApprovalEmail:
+    Description: E-Mail address for approval notifications
+    Type: String
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Stage Resources"
+        Parameters:
+          - StageBucketName
+          - StageDistributionId
+
+      - Label:
+          default: "Production Resources"
+        Parameters:
+          - ProdBucketName
+          - ProdDistributionId
+
+      - Label:
+          default: "Source Repository"
+        Parameters:
+          - GitHubOwner
+          - GitHubRepo
+          - GitHubBranch
+          - GitHubWebhookSecretToken
+          - GitHubAccessToken
+
+      - Label:
+          default: "Approval"
+        Parameters:
+          - ApprovalEmail
+
+Resources:
+  ArtifactStoreBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${AWS::StackName}-artifact-store"
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  ArtifactStoreBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ArtifactStoreBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Id: SSEAndSSLPolicy
+        Statement:
+          - Sid: DenyUnEncryptedObjectUploads
+            Effect: Deny
+            Principal: "*"
+            Action: s3:PutObject
+            Resource: !Sub "${ArtifactStoreBucket.Arn}/*"
+            Condition:
+              StringNotEquals:
+                s3:x-amz-server-side-encryption: aws:kms
+
+          - Sid: DenyInsecureConnections
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource: !Sub "${ArtifactStoreBucket.Arn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+
+  PipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /service-role/
+      RoleName: !Sub "${AWS::StackName}-pipeline"
+      Description: !Sub "CodePipeline role to manage \"${AWS::StackName}\" pipeline"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub "${AWS::StackName}-pipeline-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Resource:
+                  - "*"
+                Action:
+                  - cloudwatch:*
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                  - s3:*
+                  - sns:*
+
+  ProjectBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /service-role/
+      RoleName: !Sub "${AWS::StackName}-project-build"
+      Description: !Sub "CodeBuild role for building \"${AWS::StackName}\" project"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
+      Policies:
+        - PolicyName: !Sub "${AWS::StackName}-project-build-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: BuildLogging
+                Effect: Allow
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:codebuild:log-stream:${AWS::StackName}-build"
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:codebuild:log-stream:${AWS::StackName}-build/*"
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+
+              - Sid: ArtifactAccess
+                Effect: Allow
+                Resource:
+                  - !Sub "${ArtifactStoreBucket.Arn}"
+                  - !Sub "${ArtifactStoreBucket.Arn}/*"
+                Action:
+                  - s3:GetBucketAcl
+                  - s3:GetBucketLocation
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+
+              - Sid: ECRPullPolicy
+                Effect: Allow
+                Resource:
+                  - "*"
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+
+  ProjectDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /service-role/
+      RoleName: !Sub "${AWS::StackName}-project-deploy"
+      Description: !Sub "CodeBuild role for deploying \"${AWS::StackName}\" project"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub "${AWS::StackName}-project-build-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: BuildLogging
+                Effect: Allow
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:codebuild:log-stream:${AWS::StackName}-deploy"
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:codebuild:log-stream:${AWS::StackName}-deploy/*"
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+
+              - Sid: CFInvalidation
+                Effect: Allow
+                Resource:
+                  - !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${StageDistributionId}"
+                  - !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${ProdDistributionId}"
+                Action: cloudfront:CreateInvalidation
+
+              - Sid: DeployToS3
+                Effect: Allow
+                Resource:
+                  - !Sub "arn:aws:s3:::${StageBucketName}"
+                  - !Sub "arn:aws:s3:::${StageBucketName}/*"
+                  - !Sub "arn:aws:s3:::${ProdBucketName}"
+                  - !Sub "arn:aws:s3:::${ProdBucketName}/*"
+                Action: s3:*
+
+              - Sid: ArtifactDownload
+                Effect: Allow
+                Resource:
+                  - !Sub "${ArtifactStoreBucket.Arn}"
+                  - !Sub "${ArtifactStoreBucket.Arn}/*"
+                Action:
+                  - s3:GetBucketAcl
+                  - s3:GetBucketLocation
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+
+              - Sid: ECRPullPolicy
+                Effect: Allow
+                Resource:
+                  - "*"
+                Action:
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:GetDownloadUrlForLayer
+
+  # @todo: configure caching
+  BuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "${AWS::StackName}-build"
+      ServiceRole: !Sub "${ProjectBuildRole.Arn}"
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: build/build.buildspec.yml
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:1.0
+        ImagePullCredentialsType: CODEBUILD
+      Artifacts:
+        Type: CODEPIPELINE
+      QueuedTimeoutInMinutes: 480 # 5—480
+      TimeoutInMinutes: 5 # 5—480
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: codebuild
+          StreamName: !Sub "${AWS::StackName}-build"
+
+  DeployProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "${AWS::StackName}-deploy"
+      ServiceRole: !Sub "${ProjectDeployRole.Arn}"
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: build/deploy.buildspec.yml
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:1.0
+        ImagePullCredentialsType: CODEBUILD
+      Artifacts:
+        Type: CODEPIPELINE
+      QueuedTimeoutInMinutes: 480 # 5—480
+      TimeoutInMinutes: 5 # 5—480
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: codebuild
+          StreamName: !Sub "${AWS::StackName}-deploy"
+
+  Topic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${AWS::StackName}-deploy-approval"
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref ApprovalEmail
+
+  PipelineHook:
+    Type: AWS::CodePipeline::Webhook
+    Properties:
+      Name: !Sub "${AWS::StackName}"
+      Authentication: GITHUB_HMAC
+      AuthenticationConfiguration:
+        SecretToken: !Ref GitHubWebhookSecretToken
+      Filters:
+        - JsonPath: $.ref
+          MatchEquals: refs/heads/{Branch}
+      TargetPipeline: !Ref Pipeline
+      TargetPipelineVersion: !GetAtt [Pipeline, Version]
+      TargetAction: github-clone
+
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Ref AWS::StackName
+      RoleArn: !Sub "${PipelineRole.Arn}"
+      ArtifactStore:
+        Location: !Ref ArtifactStoreBucket
+        Type: S3
+
+      Stages:
+        # Source stage
+        - Name: source
+          Actions:
+            - Name: github-clone
+              RunOrder: 1
+              ActionTypeId:
+                Category: Source
+                Provider: GitHub
+                Owner: ThirdParty
+                Version: "1"
+              Configuration:
+                Owner: !Ref GitHubOwner
+                Repo: !Ref GitHubRepo
+                Branch: !Ref GitHubBranch
+                OAuthToken: !Ref GitHubAccessToken
+                PollForSourceChanges: false
+              OutputArtifacts:
+                - Name: source-code
+
+        # @todo: split building and deploying into separate stages
+        # Stage stage
+        - Name: stage
+          Actions:
+            - Name: stage-build
+              RunOrder: 1
+              InputArtifacts:
+                - Name: source-code
+              ActionTypeId:
+                Category: Build
+                Provider: CodeBuild
+                Owner: AWS
+                Version: "1"
+              Configuration:
+                ProjectName: !Ref BuildProject
+              OutputArtifacts:
+                - Name: project-build
+
+            - Name: stage-deploy
+              RunOrder: 2
+              InputArtifacts:
+                - Name: project-build
+              ActionTypeId:
+                Category: Build
+                Provider: CodeBuild
+                Owner: AWS
+                Version: "1"
+              Configuration:
+                ProjectName: !Ref DeployProject
+                EnvironmentVariables: !Sub |
+                  [
+                    { "name": "DEPLOY_BUCKET_NAME",     "value": "${StageBucketName}" },
+                    { "name": "DEPLOY_DISTRIBUTION_ID", "value": "${StageDistributionId}" }
+                  ]
+
+        # Production stage
+        - Name: prod
+          Actions:
+            - Name: prod-approve
+              RunOrder: 1
+              ActionTypeId:
+                Category: Approval
+                Provider: Manual
+                Owner: AWS
+                Version: "1"
+              Configuration:
+                NotificationArn: !Ref Topic
+
+            - Name: prod-deploy
+              RunOrder: 2
+              InputArtifacts:
+                - Name: project-build
+              ActionTypeId:
+                Category: Build
+                Provider: CodeBuild
+                Owner: AWS
+                Version: "1"
+              Configuration:
+                ProjectName: !Ref DeployProject
+                EnvironmentVariables: !Sub |
+                  [
+                    { "name": "DEPLOY_BUCKET_NAME",     "value": "${ProdBucketName}" },
+                    { "name": "DEPLOY_DISTRIBUTION_ID", "value": "${ProdDistributionId}" }
+                  ]
+
+Outputs:
+  Pipeline:
+    Description: Pipeline
+    Value: !Ref Pipeline
