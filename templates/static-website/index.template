@@ -1,0 +1,133 @@
+
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: An integrating stack for static website hosting (hosting + pipeline)
+
+Parameters:
+
+  #============================#
+  # RESOURCES STACK PARAMETERS #
+  #============================#
+
+  TemplatesBucketName:
+    Description: A name of the bucket where stack templates are available
+    Type: String
+
+  TechZoneName:
+    Description: A name of a zone where the website should be hosted (without trailing dot)
+    Type: String
+
+  PublicZoneName:
+    Description: A name of a zone where the website should be hosted (without trailing dot) [optional]
+    Type: String
+
+  PublicDomainName:
+    Description: A public domain name (without trailing dot) [optional]
+    Type: String
+
+  CertificateId:
+    Description: An identifier for wildcard certificate in "us-east-1" region that covers the specified hosted zone
+    Type: String
+
+
+  #===========================#
+  # PIPELINE STACK PARAMETERS #
+  #===========================#
+
+  GitHubOwner:
+    Description: Name of the GitHub repository owner
+    Type: String
+
+  GitHubRepo:
+    Description: Name of the GitHub repository
+    Type: String
+
+  GitHubBranch:
+    Description: GitHub repository branch
+    Type: String
+
+  GitHubWebhookSecretToken:
+    Description: >-
+      A secret token to configure webhook on your GitHub repository.
+      You can just use a random string with 20 characters in length.
+    Type: String
+    MinLength: 40
+    MaxLength: 40
+    NoEcho: true
+
+  GitHubAccessToken:
+    Description: Personal access token to connect to GitHub account
+    Type: String
+    MinLength: 40
+    MaxLength: 40
+    NoEcho: true
+
+  ApprovalEmail:
+    Description: E-Mail address for approval notifications
+    Type: String
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: "Common Settings"
+        Parameters:
+          - CertificateId
+          - TechZoneName
+
+      - Label:
+          default: "Public Domain Name (optional)"
+        Parameters:
+          - PublicZoneName
+          - PublicDomainName
+
+      - Label:
+          default: "Source Repository"
+        Parameters:
+          - GitHubOwner
+          - GitHubRepo
+          - GitHubBranch
+          - GitHubWebhookSecretToken
+          - GitHubAccessToken
+
+      - Label:
+          default: "Release Approval"
+        Parameters:
+          - ApprovalEmail
+
+Resources:
+  ResourcesStageStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://s3.amazonaws.com/{$TemplatesBucketName}/static-website/resources.cf.yml"
+      Parameters:
+        Environment: stage
+        TechZoneName: !Ref TechZoneName
+        CertificateId: !Ref CertificateId
+
+  ResourcesProdStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://s3.amazonaws.com/{$TemplatesBucketName}/static-website/resources.cf.yml"
+      Parameters:
+        Environment: prod
+        TechZoneName: !Ref TechZoneName
+        PublicZoneName: !Ref PublicZoneName
+        PublicDomainName: !Ref PublicDomainName
+        CertificateId: !Ref CertificateId
+
+  PipelineStack:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      TemplateURL: !Sub "https://s3.amazonaws.com/{$TemplatesBucketName}/static-website/pipeline.cf.yml"
+      Parameters:
+        StageBucketName: !GetAtt [ResourcesStageStack, BucketName]
+        StageDistributionId: !GetAtt [ResourcesStageStack, DistributionId]
+        ProdBucketName: !GetAtt [ResourcesProdStack, BucketName]
+        ProdDistributionId: !GetAtt [ResourcesProdStack, DistributionId]
+        GitHubOwner: !Ref GitHubOwner
+        GitHubRepo: !Ref GitHubRepo
+        GitHubBranch: !Ref GitHubBranch
+        GitHubWebhookSecretToken: !Ref GitHubWebhookSecretToken
+        GitHubAccessToken: !Ref GitHubAccessToken
+        ApprovalEmail: !Ref ApprovalEmail
