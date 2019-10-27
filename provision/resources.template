@@ -1,0 +1,20 @@
+
+AWSTemplateFormatVersion: "2010-09-09"
+
+Description: A stack for AWS CloudFront Templates hosting
+
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${AWS::StackName}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+Outputs:
+  BucketName:
+    Description: S3 Bucket Name
+    Value: !Ref S3Bucket
