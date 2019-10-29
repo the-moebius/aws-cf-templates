@@ -289,7 +289,7 @@ Resources:
       ServiceRole: !Sub "${ProjectBuildRole.Arn}"
       Source:
         Type: CODEPIPELINE
-        BuildSpec: build/build.buildspec.yml
+        BuildSpec: ci/build.buildspec.yml
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
@@ -312,7 +312,7 @@ Resources:
       ServiceRole: !Sub "${ProjectDeployRole.Arn}"
       Source:
         Type: CODEPIPELINE
-        BuildSpec: build/deploy.buildspec.yml
+        BuildSpec: ci/deploy.buildspec.yml
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
