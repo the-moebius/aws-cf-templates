@@ -4,12 +4,13 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: A stack for static website hosting using S3 + Cloudfront
 
 Parameters:
-  Environment:
-    Description: Name of the execution environment
+  StackName:
+    Description: A custom stack name used to prefix resources
     Type: String
-    AllowedValues:
-      - stage
-      - prod
+
+  BucketPrefix:
+    Description: A prefix used for unique S3 bucket names
+    Type: String
 
   TechZoneName:
     Description: A name of a zone where the website should be hosted (without trailing dot)
@@ -33,7 +34,8 @@ Metadata:
       - Label:
           default: "Common Settings"
         Parameters:
-          - Environment
+          - StackName
+          - BucketPrefix
           - CertificateId
           - TechZoneName
       - Label:
@@ -43,10 +45,7 @@ Metadata:
           - PublicDomainName
 
 Conditions:
-  IsStage: !Equals [!Ref Environment, stage]
-  IsProd: !Equals [!Ref Environment, prod]
   ShouldUsePublicDomain: !And
-    - !Condition IsProd
     - !Not [!Equals [!Ref PublicZoneName, ""]]
     - !Not [!Equals [!Ref PublicDomainName, ""]]
 
@@ -54,7 +53,7 @@ Resources:
   S3Bucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub "${AWS::StackName}"
+      BucketName: !Sub "${BucketPrefix}-${StackName}"
       PublicAccessBlockConfiguration:
         BlockPublicAcls: true
         BlockPublicPolicy: true
@@ -117,9 +116,9 @@ Resources:
               Forward: none
             QueryString: false
         Aliases:
-          - !Sub "${AWS::StackName}.${TechZoneName}"
+          - !Sub "${StackName}.${TechZoneName}"
           - !If
-            - IsProd
+            - ShouldUsePublicDomain
             - !Ref PublicDomainName
             - !Ref AWS::NoValue
         ViewerCertificate:
@@ -132,8 +131,8 @@ Resources:
     Properties:
       Type: A
       HostedZoneName: !Sub ${TechZoneName}.
-      Name: !Sub "${AWS::StackName}.${TechZoneName}"
-      Comment: !Sub "CloudFront distribution alias for \"${AWS::StackName}\" bucket"
+      Name: !Sub "${StackName}.${TechZoneName}"
+      Comment: !Sub "CloudFront distribution alias for \"${StackName}\" bucket"
       AliasTarget:
         DNSName: !GetAtt CloudFrontDistribution.DomainName
         # Using a global ZoneId for CloudFront from documentation
@@ -141,12 +140,12 @@ Resources:
 
   PublicDnsRecordSet:
     Type: AWS::Route53::RecordSet
-    Condition: IsProd
+    Condition: ShouldUsePublicDomain
     Properties:
       Type: A
       HostedZoneName: !Sub ${PublicZoneName}.
       Name: !Ref PublicDomainName
-      Comment: !Sub "CloudFront distribution alias for \"${AWS::StackName}\" bucket"
+      Comment: !Sub "CloudFront distribution alias for \"${StackName}\" bucket"
       AliasTarget:
         DNSName: !GetAtt CloudFrontDistribution.DomainName
         # Using a global ZoneId for CloudFront from documentation
@@ -167,7 +166,7 @@ Outputs:
 
   TechDomainUrl:
     Description: Website URL using technical domain name
-    Value: !Sub "https://${AWS::StackName}.${TechZoneName}"
+    Value: !Sub "https://${StackName}.${TechZoneName}"
 
   PublicDomainUrl:
     Description: Public website URL

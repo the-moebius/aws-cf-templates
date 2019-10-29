@@ -5,6 +5,15 @@ Description: An integrating stack for static website hosting (hosting + pipeline
 
 Parameters:
 
+  #===================#
+  # COMMON PARAMETERS #
+  #===================#
+
+  BucketPrefix:
+    Description: A prefix used for unique S3 bucket names
+    Type: String
+
+
   #============================#
   # RESOURCES STACK PARAMETERS #
   #============================#
@@ -99,18 +108,22 @@ Resources:
   ResourcesStageStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub "https://s3.amazonaws.com/{$TemplatesBucketName}/static-website/resources.cf.yml"
+      TemplateURL: !Sub "https://s3.amazonaws.com/${TemplatesBucketName}/static-website/resources.template"
       Parameters:
-        Environment: stage
+        StackName: !Sub "${AWS::StackName}-stage"
+        BucketPrefix: !Ref BucketPrefix
         TechZoneName: !Ref TechZoneName
+        PublicZoneName: ""
+        PublicDomainName: ""
         CertificateId: !Ref CertificateId
 
   ResourcesProdStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub "https://s3.amazonaws.com/{$TemplatesBucketName}/static-website/resources.cf.yml"
+      TemplateURL: !Sub "https://s3.amazonaws.com/${TemplatesBucketName}/static-website/resources.template"
       Parameters:
-        Environment: prod
+        StackName: !Sub "${AWS::StackName}-prod"
+        BucketPrefix: !Ref BucketPrefix
         TechZoneName: !Ref TechZoneName
         PublicZoneName: !Ref PublicZoneName
         PublicDomainName: !Ref PublicDomainName
@@ -119,12 +132,14 @@ Resources:
   PipelineStack:
     Type: AWS::CloudFormation::Stack
     Properties:
-      TemplateURL: !Sub "https://s3.amazonaws.com/{$TemplatesBucketName}/static-website/pipeline.cf.yml"
+      TemplateURL: !Sub "https://s3.amazonaws.com/${TemplatesBucketName}/static-website/pipeline.template"
       Parameters:
-        StageBucketName: !GetAtt [ResourcesStageStack, BucketName]
-        StageDistributionId: !GetAtt [ResourcesStageStack, DistributionId]
-        ProdBucketName: !GetAtt [ResourcesProdStack, BucketName]
-        ProdDistributionId: !GetAtt [ResourcesProdStack, DistributionId]
+        StackName: !Ref AWS::StackName
+        BucketPrefix: !Ref BucketPrefix
+        StageBucketName: !GetAtt [ResourcesStageStack, Outputs.BucketName]
+        StageDistributionId: !GetAtt [ResourcesStageStack, Outputs.DistributionId]
+        ProdBucketName: !GetAtt [ResourcesProdStack, Outputs.BucketName]
+        ProdDistributionId: !GetAtt [ResourcesProdStack, Outputs.DistributionId]
         GitHubOwner: !Ref GitHubOwner
         GitHubRepo: !Ref GitHubRepo
         GitHubBranch: !Ref GitHubBranch
