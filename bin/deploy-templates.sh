@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+set -e
+set -o pipefail
+
 ROOT_PATH="$(dirname "$0")/.."
 PROJECT_NAME="${1:-moebius}"
 STACK_NAME="${PROJECT_NAME}-aws-cf-templates"
