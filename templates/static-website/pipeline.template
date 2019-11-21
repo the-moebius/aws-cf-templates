@@ -349,6 +349,7 @@ Resources:
       TargetPipeline: !Ref Pipeline
       TargetPipelineVersion: !GetAtt [Pipeline, Version]
       TargetAction: github-clone
+      RegisterWithThirdParty: "true"
 
   Pipeline:
     Type: AWS::CodePipeline::Pipeline
@@ -375,7 +376,7 @@ Resources:
                 Repo: !Ref GitHubRepo
                 Branch: !Ref GitHubBranch
                 OAuthToken: !Ref GitHubAccessToken
-                PollForSourceChanges: false
+                PollForSourceChanges: "false"
               OutputArtifacts:
                 - Name: source-code
 
